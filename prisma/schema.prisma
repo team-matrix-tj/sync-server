@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RevisionKind {
+  UPSERT
+  DELETE
+}
+
+model Workspace {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(255)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  devices Device[]
+  files   File[]
+  events  Event[]
+
+  @@map("workspaces")
+}
+
+model Device {
+  id              String   @id @default(uuid()) @db.Uuid
+  workspaceId     String   @db.Uuid
+  name            String   @db.VarChar(255)
+  tokenHash       String   @db.VarChar(255)
+  lastSeenAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  revisions Revision[]
+  events    Event[]
+
+  @@index([workspaceId])
+  @@map("devices")
+}
+
+model File {
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @db.Uuid
+  path              String    @db.VarChar(1024)
+  deleted           Boolean   @default(false)
+  currentRevisionId String?   @unique @db.Uuid
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  workspace       Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  currentRevision Revision?  @relation("CurrentFileRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
+  revisions       Revision[] @relation("FileRevisions")
+  events          Event[]
+
+  @@unique([workspaceId, path])
+  @@index([workspaceId, deleted])
+  @@map("files")
+}
+
+model Revision {
+  id             String       @id @default(uuid()) @db.Uuid
+  fileId         String       @db.Uuid
+  workspaceId    String       @db.Uuid
+  deviceId       String       @db.Uuid
+  parentRevisionId String?    @db.Uuid
+  kind           RevisionKind
+  isDelete       Boolean
+  contentHash    String?      @db.VarChar(128)
+  sizeBytes      Int?
+  storageKey     String?      @db.VarChar(1024)
+  createdAt      DateTime     @default(now())
+
+  file           File         @relation("FileRevisions", fields: [fileId], references: [id], onDelete: Cascade)
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  device         Device       @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  parentRevision Revision?    @relation("RevisionParent", fields: [parentRevisionId], references: [id], onDelete: SetNull)
+  children       Revision[]   @relation("RevisionParent")
+  currentForFile File?        @relation("CurrentFileRevision")
+  events         Event[]
+
+  @@index([fileId, createdAt])
+  @@index([workspaceId, createdAt])
+  @@index([deviceId, createdAt])
+  @@map("revisions")
+}
+
+model Event {
+  seq          BigInt     @id @default(autoincrement())
+  workspaceId  String     @db.Uuid
+  deviceId     String     @db.Uuid
+  fileId       String     @db.Uuid
+  revisionId   String     @db.Uuid
+  path         String     @db.VarChar(1024)
+  kind         RevisionKind
+  createdAt    DateTime   @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  device    Device    @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  file      File      @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  revision  Revision  @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, seq])
+  @@index([workspaceId, createdAt])
+  @@map("events")
+}
